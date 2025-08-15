@@ -4,7 +4,7 @@
 config HW75_INDICATOR
 	bool "LED indicator"
 	depends on LED_STRIP_REMAP
-	default y if ZMK_RGB_UNDERGLOW
+	default n if ZMK_RGB_UNDERGLOW
 
 if HW75_INDICATOR
 

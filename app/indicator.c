@@ -17,6 +17,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/activity_state_changed.h>
 
 #include <app/indicator.h>
+#include <zmk/events/layer_state_changed.h>  // 新增：图层事件支持
+#include <zmk/keymap.h>                      // 新增：获取图层状态
 
 #define STRIP_CHOSEN          DT_CHOSEN(zmk_underglow)
 #define STRIP_INDICATOR_LABEL "STATUS"
@@ -27,6 +29,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define RED   (RGB(0xFF, 0x00, 0x00))
 #define GREEN (RGB(0x00, 0xFF, 0x00))
 
+#define LAYER_INDICATOR_LABEL "LAYER"        // 新增：图层指示灯标签
+#define MAX_LAYERS 8                         // 新增：支持的最大图层数
 static const struct device *led_strip;
 
 static struct indicator_settings settings = {
@@ -47,11 +51,30 @@ static inline struct led_rgb apply_brightness(struct led_rgb color, uint8_t bri)
 	return RGB(color.r * bri / 255, color.g * bri / 255, color.b * bri / 255);
 }
 
+/* 图层颜色预设 (红、绿、黄、蓝、品红、青、白) */
+static const struct led_rgb layer_colors[MAX_LAYERS] = {
+    RGB(0xFF, 0x00, 0x00),  // Layer 1: 红
+    RGB(0x00, 0xFF, 0x00),  // Layer 2: 绿
+    RGB(0xFF, 0xFF, 0x00),  // Layer 3: 黄
+    RGB(0x00, 0x00, 0xFF),  // Layer 4: 蓝
+    RGB(0xFF, 0x00, 0xFF),  // Layer 5: 品红
+    RGB(0x00, 0xFF, 0xFF),  // Layer 6: 青
+    RGB(0xFF, 0xFF, 0xFF),  // Layer 7: 白
+    RGB(0xFF, 0x80, 0x00)   // Layer 8: 橙
+};
+
+/* 添加在全局变量区域 */
+static uint8_t current_layer = 0;           // 新增：当前激活图层
+
+
+
+
 static void indicator_update(struct k_work *work)
 {
 	if (!settings.enable) {
 		unsigned int key = irq_lock();
 		led_strip_remap_clear(led_strip, STRIP_INDICATOR_LABEL);
+		led_strip_remap_clear(led_strip, LAYER_INDICATOR_LABEL); // 新增：清除图层指示灯
 		irq_unlock(key);
 		return;
 	}
@@ -66,7 +89,20 @@ static void indicator_update(struct k_work *work)
 
 	unsigned int key = irq_lock();
 	led_strip_remap_set(led_strip, STRIP_INDICATOR_LABEL, &color);
+	    /* 新增：图层指示灯逻辑 */
+    struct led_rgb layer_color = {0};
+    if (current_layer > 0 && current_layer <= MAX_LAYERS) {
+        layer_color = BRI(layer_colors[current_layer - 1], bri);
+    }
+    led_strip_remap_set(led_strip, LAYER_INDICATOR_LABEL, &layer_color);
 	irq_unlock(key);
+}
+/* 新增：更新图层状态 */
+static void update_layer_state(void)
+{
+    current_layer = zmk_keymap_highest_layer_active();
+    LOG_DBG("Layer changed: %d", current_layer);
+    post_indicator_update();
 }
 
 K_WORK_DEFINE(indicator_update_work, indicator_update);
@@ -205,7 +241,11 @@ static int indicator_event_listener(const zmk_event_t *eh)
 		post_indicator_update();
 		return 0;
 	}
-
+    struct zmk_layer_state_changed *layer_ev;
+    if ((layer_ev = as_zmk_layer_state_changed(eh)) != NULL) {
+        update_layer_state();
+        return 0;
+    }
 	return -ENOTSUP;
 }
 
@@ -230,11 +270,12 @@ static int indicator_init(const struct device *dev)
 
 	k_mutex_init(&lock);
 	k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &indicator_update_work);
+    update_layer_state();
 
 	return 0;
 }
 
 ZMK_LISTENER(indicator, indicator_event_listener);
 ZMK_SUBSCRIPTION(indicator, zmk_activity_state_changed);
-
+ZMK_SUBSCRIPTION(indicator, zmk_layer_state_changed); 
 SYS_INIT(indicator_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

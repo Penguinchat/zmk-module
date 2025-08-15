@@ -1,0 +1,2 @@
+zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+zephyr_library_sources_ifdef(CONFIG_HW75_INDICATOR indicator.c)
